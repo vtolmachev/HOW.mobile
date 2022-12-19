@@ -16,8 +16,8 @@ import 'package:mqtt_client/mqtt_server_client.dart';
 import 'package:http/http.dart' as http;
 
 //WEB
-//import 'package:flutter/foundation.dart' show kIsWeb;
-//import 'package:mqtt_client/mqtt_browser_client.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:mqtt_client/mqtt_browser_client.dart';
 //WEB
 
 void main() {
@@ -35,139 +35,145 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: const MyHomePage(title: 'Настройка роутеров'),
+      home: const Content(title: 'Настройка роутеров'),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({Key? key, required this.title}) : super(key: key);
+class Content extends StatefulWidget {
+  const Content({Key? key, required this.title}) : super(key: key);
 
   final String title;
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<Content> createState() => _ContentState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _ContentState extends State<Content> {
+
+  //Внутренние переменные
   //"https://how.hpn.kz/info/?imei=868186041755552"
-  String _barcode = "IMEI:868186041755099";//"IMEI:868186041755438";
-  String _selected = "";
-  bool _internet_is_connected = false;
-  bool _mqtt_is_connected = false;
-  bool _is_subscribed = false;
-  bool _has_data = false;
-  var data = <String, dynamic>{};
-  var _subscription;
-  var _client;
-  Graph _graph = Graph();
-  TextEditingController controller_imei = TextEditingController();
 
-  Timer? _t;
+  String  _barcode = "";//"""IMEI:868186041755099";//Тут хранится отсканированный
+                                        // или введенный IMEI
 
+  String  _selectedImei = "";           //Текущий выбранный IMEI
+                                        // для отображения сигнала
+
+  bool    _mqttIsConnected = false;     //Признак подключения к серверу
+  var     _data = <String, dynamic>{};  //Основные данные приложения
+  var     _mqttClient;                  //MQTT клиент
+  final Graph _graph = Graph();         //Граф для отображения
+
+                                        //Контроллер ручного ввода IMEI
+  final TextEditingController _controllerImei = TextEditingController();
+
+  ///Функция сканирования QR для мобильного приложения
   startScan() async {
     String barcodeRes = await FlutterBarcodeScanner.scanBarcode(
         "#ff6666", "Отмена", false, ScanMode.DEFAULT);
+
+    if (getImei(barcodeRes)=="?") {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('IMEI не распознан!'),
+      ));
+      return;
+    }
+
+    //Сохраняем IMEI и получаем список IMEI для графа
     setState(() {
       _barcode = barcodeRes;
       getListIMEIs();
-      if (_mqtt_is_connected) _client.disconnect();
-      // if (_internet_is_connected) {
-      //   startMQTTConnect();
-      // }
     });
   }
 
-  no_internet() {
+  ///Отображение в случае отсутствия интернета
+  Widget noInternet() {
     return const Padding(
         padding: EdgeInsets.all(20),
         child: Center(
             child: Text(
-          "Для работы приложения необходимо подключиться к сети internet",
+          "Для работы приложения необходимо подключиться к сети Internet",
           style: TextStyle(fontSize: 20),
         )));
   }
 
-  mqtt_connecting() {
+  ///Отображение в случае отсутствия связи с MQTT сервером
+  Widget mqttConnecting() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: const [
         Padding(
             padding: EdgeInsets.all(20),
-            child: Text(
-              "Идет подключение к серверу телеметрии",
+            child: Center( child: Text(
+              "Идет подключение к серверу телеметрии...",
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 20),
-            ))
+            )))
       ],
     );
   }
 
-  RegExp _numeric = RegExp(r'^-?[0-9]+$');
-
+  //Регуляряка для проверки что введено числовое значение
+  final RegExp _numeric = RegExp(r'^-?[0-9]+$');
+  ///Функция проверки ввода числового значения
   bool isNumeric(String str) {
     return _numeric.hasMatch(str);
   }
 
-  need_scan_qr() {
-    // if (kIsWeb) {
-    //   return Center( child:Column(
-    //     mainAxisAlignment: MainAxisAlignment.center,
-    //     crossAxisAlignment: CrossAxisAlignment.center,
-    //     children: [
-    //        Padding(
-    //           padding: EdgeInsets.all(20),
-    //           child: SizedBox(width: 150, child: TextFormField(
-    //             cursorColor: Colors.black,
-    //             keyboardType: TextInputType.number,
-    //             decoration: const InputDecoration(
-    //                 labelText: "IMEI"),
-    //             controller: controller_imei,
-    //           ))),
-    //       TextButton(
-    //           onPressed: () {
-    //             if (controller_imei.text.trim().length==15) {
-    //               if (isNumeric(controller_imei.text.trim())) {
-    //                 setState(() {
-    //                   _barcode = "IMEI:${controller_imei.text.trim()}";
-    //                   startMQTTConnect();
-    //                 });
-    //                 return;
-    //               }
-    //             }
-    //             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-    //               content: Text('IMEI введен не кооректно!'),
-    //             ));
-    //           },
-    //           child: Text("ОК")),
-    //     ],
-    //   ));
-    //
-    // }
-    return Center( child:Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        const Padding(
-            padding: EdgeInsets.all(20),
-            child: Text(
-              "Отсканируйте QR код на роутере",
-              style: TextStyle(fontSize: 20),
-            )),
-        TextButton(
-            onPressed: () {
-              startScan();
-            },
-            child: Text("Сканировать")),
-      ],
-    ));
+  Widget needScanQR() {
+      return Center( child:Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+           Padding(
+              padding: EdgeInsets.all(20),
+              child: SizedBox(width: 150, child: TextFormField(
+                cursorColor: Colors.black,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                    labelText: "IMEI"),
+                controller: _controllerImei,
+              ))),
+          TextButton(
+              onPressed: () {
+                String im = _controllerImei.text.trim().replaceAll("-", "");
+                if (im.length==15) {
+                  if (isNumeric(im)) {
+                    setState(() {
+                      _barcode = "IMEI:$im";
+                      //startMQTTConnect();
+                      getListIMEIs();
+                    });
+                    return;
+                  }
+                }
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('IMEI введен не кооректно!'),
+                ));
+              },
+              child: Text("ОК")),
+          if (!kIsWeb) ... [
+            TextButton(
+                onPressed: () {
+                  startScan();
+                },
+                child: Text("Сканировать"))
+          ]
+
+        ],
+      ));
+
+
   }
 
-  String get_imei() {
-    if (_barcode.startsWith("IMEI:"))
-      return _barcode.split(":")[1].trim();
+  ///Извлекает IMEI из отсканированной либо введенной переменной _barcode
+  String getImei(String bc) {
+    if (bc.startsWith("IMEI:"))
+      return bc.split(":")[1].trim();
     
-    String res = _barcode.replaceAll("https://how.hpn.kz/info/?", "");
+    String res = bc.replaceAll("https://how.hpn.kz/info/?", "");
     var params = res.split("&");
     for(var p in params) {
       var sub = p.split("=");
@@ -179,12 +185,19 @@ class _MyHomePageState extends State<MyHomePage> {
     return "?";
   }
 
-  mqtt_subscribe(String topic) {
-    _client.subscribe(topic, MqttQos.atMostOnce);
+  ///Осуществляет подписку на роутер
+  void mqtt_subscribe(String topic) {
+    _mqttClient.subscribe(topic, MqttQos.atMostOnce);
   }
 
-  quart_circle(
-      int pos, double percent, double size, String label, bool show_labels) {
+  ///Отрисовывает четвертинку для сигнала роутера
+  /// pos - 0 (ниж. левый угол), 1 (верх левый), 2 (верх правый), 3 (нижний прав)
+  /// percent - процент уровня сигнала
+  /// size - размер виджета (всех 4х частей)
+  /// label - подпись
+  /// showLabels - признак того, нужны ли надписи
+  Widget quart_circle(
+      int pos, double percent, double size, String label, bool showLabels) {
     return Stack(
       children: [
         SizedBox(
@@ -232,7 +245,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   width: percent * size / 100,
                   height: percent * size / 100,
                 ))),
-        if (show_labels) ...{
+        if (showLabels) ...{
           SizedBox(
               width: size,
               height: size,
@@ -252,31 +265,42 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  double calc_percent(
-      double? val, double min_percent, double min_signal, double max_signal) {
-    if (val==null)
-      return min_percent;
+  ///Вычисляет процент по сигналу
+  ///val - значение, которое нужно преобразовать в процент
+  ///minPercent - минимальный процент, меньше которого отображать нельзя
+  ///minSignal - минимальный уровень сигнала
+  ///maxSignal - максимальный уровень сигнала
+  double calcSignalPercent(
+      double? val, double minPercent, double minSignal, double maxSignal) {
+    if (val==null) {
+      return minPercent;
+    }
 
     double percent = 0;
-    if (val <= min_signal)
-      percent = min_percent;
-    else if (val >= max_signal)
+    if (val <= minSignal) {
+      percent = minPercent;
+    } else if (val >= maxSignal) {
       percent = 100;
-    else {
-      double dif = max_signal - min_signal;
-      double dv = val - min_signal;
-      percent = min_percent + (dv * 100 / dif) * (1 - min_percent / 100);
+    } else {
+      double dif = maxSignal - minSignal;
+      double dv = val - minSignal;
+      percent = minPercent + (dv * 100 / dif) * (1 - minPercent / 100);
     }
 
     return percent;
   }
 
-  quality_circle(double size, double? rsrp, double? rsrq, double? rssi, double? snr,
-      bool show_labels) {
-    double rsrp_percent = calc_percent(rsrp, 10, -100, -80);
-    double rsrq_percent = calc_percent(rsrq, 10, -20, -10);
-    double rssi_percent = calc_percent(rssi, 10, -95, -65);
-    double snr_percent = calc_percent(snr, 10, 0, 20);
+  ///Рисует 4х лепестковый индиктор сигнала для lte соединения
+  ///size - размер виджета
+  ///rsrp,rsrq,rssi,snr - параметры сигнала
+  ///showLabels - подписывать или нет уровни сигнала
+  Widget qualityCircle(double size, double? rsrp, double? rsrq, double? rssi,
+      double? snr, bool showLabels) {
+
+    double rsrpPercent = calcSignalPercent(rsrp, 10, -100, -80);
+    double rsrqPercent = calcSignalPercent(rsrq, 10, -20, -10);
+    double rssiPercent = calcSignalPercent(rssi, 10, -95, -65);
+    double snrPercent = calcSignalPercent(snr, 10, 0, 20);
 
     return Column(children: [
       Row(
@@ -284,14 +308,14 @@ class _MyHomePageState extends State<MyHomePage> {
         children: [
           Column(
             children: [
-              quart_circle(3, rssi_percent, size, "RSSI ${rssi}", show_labels),
-              quart_circle(2, snr_percent, size, "SNR ${snr}", show_labels)
+              quart_circle(3, rssiPercent, size, "RSSI ${rssi}", showLabels),
+              quart_circle(2, snrPercent, size, "SNR ${snr}", showLabels)
             ],
           ),
           Column(
             children: [
-              quart_circle(0, rsrp_percent, size, "RSRP ${rsrp}", show_labels),
-              quart_circle(1, rsrq_percent, size, "RSRQ ${rsrq}", show_labels)
+              quart_circle(0, rsrpPercent, size, "RSRP ${rsrp}", showLabels),
+              quart_circle(1, rsrqPercent, size, "RSRQ ${rsrq}", showLabels)
             ],
           )
         ],
@@ -299,32 +323,36 @@ class _MyHomePageState extends State<MyHomePage> {
     ]);
   }
 
-  Widget show_selected() {
+  ///Отображает выбранный индикатор сигнала для роутера
+  Widget showSelectedIMEI() {
     return Center(child: Column(children: [
-      Padding(padding: EdgeInsets.all(20),child:Text("IMEI:${_selected}",style: TextStyle(fontSize: 20,fontWeight: FontWeight.bold),)),
-      Padding(padding: EdgeInsets.only(bottom: 20),child:Text(get_provider(_selected),style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),)),
+      Padding(padding: const EdgeInsets.all(20),
+          child:Text("IMEI:$_selectedImei",
+          style: const TextStyle(fontSize: 20,fontWeight: FontWeight.bold),)),
+      Padding(padding: const EdgeInsets.only(bottom: 20),
+          child:Text(getProvider(_selectedImei),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),)),
 
-      quality_circle(
+      qualityCircle(
           150,
-          double.tryParse(data["${_selected}_mobile"][get_provider(_selected)]["rsrp"]),
-          double.tryParse(data["${_selected}_mobile"][get_provider(_selected)]["rsrq"]),
-          double.tryParse(data["${_selected}_mobile"][get_provider(_selected)]["rssi"]),
-          double.tryParse(data["${_selected}_mobile"][get_provider(_selected)]["snr"]),
+          double.tryParse(_data["${_selectedImei}_mobile"][getProvider(_selectedImei)]["rsrp"]),
+          double.tryParse(_data["${_selectedImei}_mobile"][getProvider(_selectedImei)]["rsrq"]),
+          double.tryParse(_data["${_selectedImei}_mobile"][getProvider(_selectedImei)]["rssi"]),
+          double.tryParse(_data["${_selectedImei}_mobile"][getProvider(_selectedImei)]["snr"]),
           true
       ),
-      SizedBox(
+      const SizedBox(
         height: 20,
       )
     ],));
-
-
   }
 
-  show_data() {
-    if (_selected!="") {
-      return show_selected();
+  ///Отображение графа либо выбранного роутера
+  Widget showData() {
+    if (_selectedImei!="") {
+      return showSelectedIMEI();
     }
-    if (_graph.nodes.length==0) {
+    if (_graph.nodes.isEmpty) {
       return Center(child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -368,114 +396,116 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  String get_provider(String imei) {
-    if (data.containsKey("${imei}_mobile")) {
-      return data["${imei}_mobile"].keys.toList()[0];
+  ///Извлекает название сотового оператора
+  String getProvider(String imei) {
+    if (_data.containsKey("${imei}_mobile")) {
+      return _data["${imei}_mobile"].keys.toList()[0];
     }
     return "???";
   }
 
 
-  Widget gen_caption(Widget txt, Color color) {
-    return Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(1),
-          boxShadow: [
-            BoxShadow(color: color, spreadRadius: 0.7),
-          ],
-        ),
-        child: txt);
-  }
+  // Widget gen_caption(Widget txt, Color color) {
+  //   return Container(
+  //       decoration: BoxDecoration(
+  //         borderRadius: BorderRadius.circular(1),
+  //         boxShadow: [
+  //           BoxShadow(color: color, spreadRadius: 0.7),
+  //         ],
+  //       ),
+  //       child: txt);
+  // }
+  //
+  // Widget get_rssi_Text(String imei) {
+  //   TextStyle w = const TextStyle(fontSize: 2,color: Colors.white);
+  //   String param="rssi";
+  //   String name=param.toUpperCase();
+  //   if (!_data.containsKey("${imei}_mobile")) {
+  //     return gen_caption(Text("${name}: ???", style: w),Colors.grey);
+  //   }
+  //
+  //   String t = _data["${imei}_mobile"][getProvider(imei)][param];
+  //   double? val = double.tryParse(t);
+  //
+  //   if (val == null) return gen_caption(Text("${name}: ${t}", style: w),Colors.grey);
+  //   if (val > -65) return gen_caption(Text("${name}: ${t}", style: w),Colors.green);
+  //   if (val > -85) return gen_caption(Text("${name}: ${t}", style: w),Colors.yellow);
+  //   if (val > -95) return gen_caption(Text("${name}: ${t}", style: w),Colors.amber);
+  //   return gen_caption(Text("${name}: ${t}", style: w),Colors.red);
+  // }
+  //
+  // Widget get_rsrp_Text(String imei) {
+  //
+  //   TextStyle w = TextStyle(fontSize: 2,color: Colors.white);
+  //   String param="rsrp";
+  //   String name=param.toUpperCase();
+  //   if (!_data.containsKey("${imei}_mobile")) {
+  //     return gen_caption(Text("${name}: ???", style: w),Colors.grey);
+  //   }
+  //
+  //   String t = _data["${imei}_mobile"][getProvider(imei)][param];
+  //   double? val = double.tryParse(t);
+  //
+  //   if (val == null) return gen_caption(Text("${name}: ${t}", style: w),Colors.grey);
+  //   if (val > -80) return gen_caption(Text("${name}: ${t}", style: w),Colors.green);
+  //   if (val > -90) return gen_caption(Text("${name}: ${t}", style: w),Colors.yellow);
+  //   if (val > -100) return gen_caption(Text("${name}: ${t}", style: w),Colors.amber);
+  //   return gen_caption(Text("${name}: ${t}", style: w),Colors.red);
+  // }
+  //
+  // Widget get_rsrq_Text(String imei) {
+  //
+  //   TextStyle w = TextStyle(fontSize: 2,color: Colors.white);
+  //   String param="rsrq";
+  //   String name=param.toUpperCase();
+  //   if (!_data.containsKey("${imei}_mobile")) {
+  //     return gen_caption(Text("${name}: ???", style: w),Colors.grey);
+  //   }
+  //
+  //   String t = _data["${imei}_mobile"][getProvider(imei)][param];
+  //   double? val = double.tryParse(t);
+  //
+  //   if (val == null) return gen_caption(Text("${name}: ${t}", style: w),Colors.grey);
+  //   if (val > -10) return gen_caption(Text("${name}: ${t}", style: w),Colors.green);
+  //   if (val > -15) return gen_caption(Text("${name}: ${t}", style: w),Colors.yellow);
+  //   if (val > -20) return gen_caption(Text("${name}: ${t}", style: w),Colors.amber);
+  //   return gen_caption(Text("${name}: ${t}", style: w),Colors.red);
+  // }
+  //
+  // Widget get_snr_Text(String imei) {
+  //
+  //   TextStyle w = TextStyle(fontSize: 2,color: Colors.white);
+  //   String param="snr";
+  //   String name=param.toUpperCase();
+  //   if (!_data.containsKey("${imei}_mobile")) {
+  //     return gen_caption(Text("${name}: ???", style: w),Colors.grey);
+  //   }
+  //
+  //   String t = _data["${imei}_mobile"][getProvider(imei)][param];
+  //   double? val = double.tryParse(t);
+  //
+  //   if (val == null) return gen_caption(Text("${name}: ${t}", style: w),Colors.grey);
+  //   if (val > 20) return gen_caption(Text("${name}: ${t}", style: w),Colors.green);
+  //   if (val > 13) return gen_caption(Text("${name}: ${t}", style: w),Colors.yellow);
+  //   if (val > 0) return gen_caption(Text("${name}: ${t}", style: w),Colors.amber);
+  //   return gen_caption(Text("${name}: ${t}", style: w),Colors.red);
+  // }
 
-  Widget get_rssi_Text(String imei) {
-    TextStyle w = const TextStyle(fontSize: 2,color: Colors.white);
-    String param="rssi";
-    String name=param.toUpperCase();
-    if (!data.containsKey("${imei}_mobile")) {
-      return gen_caption(Text("${name}: ???", style: w),Colors.grey);
-    }
 
-    String t = data["${imei}_mobile"][get_provider(imei)][param];
-    double? val = double.tryParse(t);
-
-    if (val == null) return gen_caption(Text("${name}: ${t}", style: w),Colors.grey);
-    if (val > -65) return gen_caption(Text("${name}: ${t}", style: w),Colors.green);
-    if (val > -85) return gen_caption(Text("${name}: ${t}", style: w),Colors.yellow);
-    if (val > -95) return gen_caption(Text("${name}: ${t}", style: w),Colors.amber);
-    return gen_caption(Text("${name}: ${t}", style: w),Colors.red);
-  }
-
-  Widget get_rsrp_Text(String imei) {
-
-    TextStyle w = TextStyle(fontSize: 2,color: Colors.white);
-    String param="rsrp";
-    String name=param.toUpperCase();
-    if (!data.containsKey("${imei}_mobile")) {
-      return gen_caption(Text("${name}: ???", style: w),Colors.grey);
-    }
-
-    String t = data["${imei}_mobile"][get_provider(imei)][param];
-    double? val = double.tryParse(t);
-
-    if (val == null) return gen_caption(Text("${name}: ${t}", style: w),Colors.grey);
-    if (val > -80) return gen_caption(Text("${name}: ${t}", style: w),Colors.green);
-    if (val > -90) return gen_caption(Text("${name}: ${t}", style: w),Colors.yellow);
-    if (val > -100) return gen_caption(Text("${name}: ${t}", style: w),Colors.amber);
-    return gen_caption(Text("${name}: ${t}", style: w),Colors.red);
-  }
-
-  Widget get_rsrq_Text(String imei) {
-
-    TextStyle w = TextStyle(fontSize: 2,color: Colors.white);
-    String param="rsrq";
-    String name=param.toUpperCase();
-    if (!data.containsKey("${imei}_mobile")) {
-      return gen_caption(Text("${name}: ???", style: w),Colors.grey);
-    }
-
-    String t = data["${imei}_mobile"][get_provider(imei)][param];
-    double? val = double.tryParse(t);
-
-    if (val == null) return gen_caption(Text("${name}: ${t}", style: w),Colors.grey);
-    if (val > -10) return gen_caption(Text("${name}: ${t}", style: w),Colors.green);
-    if (val > -15) return gen_caption(Text("${name}: ${t}", style: w),Colors.yellow);
-    if (val > -20) return gen_caption(Text("${name}: ${t}", style: w),Colors.amber);
-    return gen_caption(Text("${name}: ${t}", style: w),Colors.red);
-  }
-
-  Widget get_snr_Text(String imei) {
-
-    TextStyle w = TextStyle(fontSize: 2,color: Colors.white);
-    String param="snr";
-    String name=param.toUpperCase();
-    if (!data.containsKey("${imei}_mobile")) {
-      return gen_caption(Text("${name}: ???", style: w),Colors.grey);
-    }
-
-    String t = data["${imei}_mobile"][get_provider(imei)][param];
-    double? val = double.tryParse(t);
-
-    if (val == null) return gen_caption(Text("${name}: ${t}", style: w),Colors.grey);
-    if (val > 20) return gen_caption(Text("${name}: ${t}", style: w),Colors.green);
-    if (val > 13) return gen_caption(Text("${name}: ${t}", style: w),Colors.yellow);
-    if (val > 0) return gen_caption(Text("${name}: ${t}", style: w),Colors.amber);
-    return gen_caption(Text("${name}: ${t}", style: w),Colors.red);
-  }
-
-
-  Color get_color(String imei) {
-    if (!data.containsKey("${imei}_mobile")) {
+  ///Определяет каким цветом отображать роутер
+  Color getColor(String imei) {
+    if (!_data.containsKey("${imei}_mobile")) {
       return Colors.grey;
     }
 
-    if (data.containsKey("${imei}_time")) {
-      DateTime d = data["${imei}_time"];
+    if (_data.containsKey("${imei}_time")) {
+      DateTime d = _data["${imei}_time"];
       if (DateTime.now().difference(d).inSeconds>62) {
         return Colors.blue;
       }
     }
 
-    var d = data["${imei}_mobile"][get_provider(imei)];
+    var d = _data["${imei}_mobile"][getProvider(imei)];
 
     if (!d.containsKey("rsrp") ||
         !d.containsKey("rsrq") ||
@@ -489,30 +519,31 @@ class _MyHomePageState extends State<MyHomePage> {
     double? rssi = double.tryParse(d["rssi"]);
     double? snr = double.tryParse(d["snr"]);
 
-    if (rsrp == null || rsrq == null || rssi == null || snr == null)
+    if (rsrp == null || rsrq == null || rssi == null || snr == null) {
       return Colors.grey;
+    }
 
-    double rsrp_q = 0;
-    if (rsrp > -100) rsrp_q = 1;
-    if (rsrp > -90) rsrp_q = 2;
-    if (rsrp > -80) rsrp_q = 3;
+    double rsrpQ = 0;
+    if (rsrp > -100) rsrpQ = 1;
+    if (rsrp > -90) rsrpQ = 2;
+    if (rsrp > -80) rsrpQ = 3;
 
-    double rsrq_q = 0;
-    if (rsrq > -20) rsrq_q = 1;
-    if (rsrq > -15) rsrq_q = 2;
-    if (rsrq > -10) rsrq_q = 3;
+    double rsrqQ = 0;
+    if (rsrq > -20) rsrqQ = 1;
+    if (rsrq > -15) rsrqQ = 2;
+    if (rsrq > -10) rsrqQ = 3;
 
-    double rssi_q = 0;
-    if (rssi > -95) rssi_q = 1;
-    if (rssi > -85) rssi_q = 2;
-    if (rssi > -65) rssi_q = 3;
+    double rssiQ = 0;
+    if (rssi > -95) rssiQ = 1;
+    if (rssi > -85) rssiQ = 2;
+    if (rssi > -65) rssiQ = 3;
 
-    double snr_q = 0;
-    if (snr > 0) snr_q = 1;
-    if (snr > 13) snr_q = 2;
-    if (snr > 20) snr_q = 3;
+    double snrQ = 0;
+    if (snr > 0) snrQ = 1;
+    if (snr > 13) snrQ = 2;
+    if (snr > 20) snrQ = 3;
 
-    double avg = (rsrp_q + rsrq_q + rssi_q + snr_q) / 4;
+    double avg = (rsrpQ + rsrqQ + rssiQ + snrQ) / 4;
 
     Color res = Colors.red;
     if (avg >= 0.7) res = Colors.amber;
@@ -522,242 +553,250 @@ class _MyHomePageState extends State<MyHomePage> {
     return res;
   }
 
+  ///Отображает роутер
   Widget nodeWidget(Node node) {
-    Color col = get_color(node.key?.value);
+    Color col = getColor(node.key?.value);
     return Stack(
       children: [
-        Container(
-            child: Center(
-                child: Column(
+        Center(
+            child: Column(
           children: [
-            Container(
-              padding: EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(2),
-                boxShadow: [
-                  BoxShadow(color: Colors.blue, spreadRadius: 1),
-                ],
-              ),
-              child: Text(
-                "${get_provider(node.key?.value)}",
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 4,
-                    fontWeight: FontWeight.bold),
-              ),
-            ),
-            SizedBox(
-                width: 30,
-                height: 30,
-                child: Stack(
-                  children: [
-                    Center(
-                        child: Container(
-                      color: Colors.white,
-                      width: 25,
-                      height: 25,
-                    )),
-                    InkWell(
-                        onTap: () {
-                          if (get_color(node.key?.value)!=Colors.grey)
-                            _selected = node.key?.value;
-                        },
-                        child:
-                            col==Colors.red ? Image(
-                                image: AssetImage('assets/images/router_red.png'))
-                            : col==Colors.amber ? Image(
-                                image: AssetImage('assets/images/router_amber.png'))
-                            : col==Colors.blue ? Image(
-                                image: AssetImage('assets/images/router_blue.png'))
-                            : col==Colors.green ? Image(
-                                image: AssetImage('assets/images/router_green.png'))
-                            : col==Colors.cyan ? Image(
-                                image: AssetImage('assets/images/router_darkcyan.png'))
-                            : Image(
-                                image: AssetImage('assets/images/router_gray.png'))
-                    )
-                  ],
+        Container(
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(2),
+            boxShadow: const [
+              BoxShadow(color: Colors.blue, spreadRadius: 1),
+            ],
+          ),
+          child: Text(
+            getProvider(node.key?.value),
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 4,
+                fontWeight: FontWeight.bold),
+          ),
+        ),
+        SizedBox(
+            width: 30,
+            height: 30,
+            child: Stack(
+              children: [
+                Center(
+                    child: Container(
+                  color: Colors.white,
+                  width: 25,
+                  height: 25,
                 )),
-            Container(
-              padding: EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(2),
-                boxShadow: [
-                  BoxShadow(color: Colors.blue, spreadRadius: 1),
-                ],
-              ),
-              child: Text(
-                "${node.key?.value}",
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 4,
-                    fontWeight: FontWeight.bold),
-              ),
-            )
+                InkWell(
+                    onTap: () {
+                      if (getColor(node.key?.value)!=Colors.grey)
+                        _selectedImei = node.key?.value;
+                    },
+                    child:
+                        col==Colors.red ? const Image(
+                            image: AssetImage('assets/images/router_red.png'))
+                        : col==Colors.amber ? const Image(
+                            image: AssetImage('assets/images/router_amber.png'))
+                        : col==Colors.blue ? const Image(
+                            image: AssetImage('assets/images/router_blue.png'))
+                        : col==Colors.green ? const Image(
+                            image: AssetImage('assets/images/router_green.png'))
+                        : col==Colors.cyan ? const Image(
+                            image: AssetImage('assets/images/router_darkcyan.png'))
+                        : const Image(
+                            image: AssetImage('assets/images/router_gray.png'))
+                )
+              ],
+            )),
+        Container(
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(2),
+            boxShadow: const [
+              BoxShadow(color: Colors.blue, spreadRadius: 1),
+            ],
+          ),
+          child: Text(
+            "${node.key?.value}",
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 4,
+                fontWeight: FontWeight.bold),
+          ),
+        )
           ],
-        ))),
+        )),
       ],
     );
   }
 
+  ///Функция для подстановки данных в алгоритм
   dynamic get_data() {
-    return data;
+    return _data;
   }
 
   /// The successful connect callback
   void onConnected() {
-    _mqtt_is_connected = true;
-    if (_barcode!="")
-      getListIMEIs();
-    _client.updates!.listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
+    print("onConnected");
+    //Подпишемся на прием данных от тпиков
+    _mqttClient.updates!.listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
       final recMess = c![0].payload as MqttPublishMessage;
-      final pt =
-          MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
+      final pt = MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
 
-      print('topic is <${c[0].topic}>, payload is <-- $pt -->');
+      //print('topic is <${c[0].topic}>, payload is <-- $pt -->');
 
       String topic = c[0].topic as String;
       List<String> parts = topic.split("/");
-      if (parts.length > 0 && parts[0] == 'HOW') {
+      if (parts.isNotEmpty && parts[0] == 'HOW') {
         String imei = parts[1];
         setState(() {
-          _is_subscribed = true;
-          _mqtt_is_connected = true;
-          _has_data = true;
-
           if (topic.startsWith("HOW/${imei}/monitoring/mobile")) {
             if (pt != '{"":}') {
-              data[imei + "_mobile"] = jsonDecode(pt);
-              data[imei + "_time"] = DateTime.now();
-            } else {
-              print("!");
+              _data["${imei}_mobile"] = jsonDecode(pt);
+              _data["${imei}_time"] = DateTime.now();
             }
           }
-          if (topic.startsWith("HOW/${imei}/monitoring/wireless")) {
-            data[imei + "_wireless"] = jsonDecode(pt);
-            data["mac_${data[imei + "_wireless"].keys.toList().first}"] = imei;
-            data[imei + "_time"] = DateTime.now();
+
+          if (topic.startsWith("HOW/$imei/monitoring/wireless")) {
+            _data["${imei}_wireless"] = jsonDecode(pt);
+            _data["mac_${_data["${imei}_wireless"].keys.toList().first}"] = imei;
+            _data["${imei}_time"] = DateTime.now();
           }
 
-          var new_eds = [];
+          var newEds = [];
           for (Node node in _graph.nodes) {
-            String cur_imei = node.key?.value;
-            if (data.containsKey("${cur_imei}_wireless")) {
-              var wireless = data["${cur_imei}_wireless"];
-              var w_data =
+            String curImei = node.key?.value;
+            if (_data.containsKey("${curImei}_wireless")) {
+              var wireless = _data["${curImei}_wireless"];
+              var wData =
                   wireless[wireless.keys.toList().first]['results'].toList();
-              for (var w_el in w_data) {
-                String mac = w_el['mac'].toString().toLowerCase();
+              for (var wEl in wData) {
+                String mac = wEl['mac'].toString().toLowerCase();
 
-                String signal = w_el['signal'].toString().toLowerCase();
-                String noise = w_el['noise'].toString().toLowerCase();
+                String signal = wEl['signal'].toString().toLowerCase();
+                String noise = wEl['noise'].toString().toLowerCase();
 
                 double? sig = double.tryParse(signal);
-                Color line_col = Colors.red;
+                Color lineCol = Colors.red;
                 if (sig!=null) {
-                  if (sig > -100) line_col = Colors.amber;
-                  if (sig > -90) line_col = Colors.yellow;
-                  if (sig > -80) line_col = Colors.green;
+                  if (sig > -100) lineCol = Colors.amber;
+                  if (sig > -90) lineCol = Colors.yellow;
+                  if (sig > -80) lineCol = Colors.green;
                 }
 
-                Paint line_paint = Paint()..color = line_col..strokeWidth=1;
+                Paint linePaint = Paint()..color = lineCol..strokeWidth=1;
 
-                if (data.containsKey("mac_${mac}")) {
-                  String con_imei = data["mac_${mac}"];
-                  Node conn = _graph.getNodeUsingId(con_imei);
-                  Edge ed1 = Edge(node, conn, paint: line_paint);
-                  Edge ed2 = Edge(conn, node, paint: line_paint);
-                  if (!new_eds.contains(ed1)) new_eds.add(ed1);
-                  if (!new_eds.contains(ed2)) new_eds.add(ed2);
+                if (_data.containsKey("mac_${mac}")) {
+                  String conImei = _data["mac_${mac}"];
+                  Node conn = _graph.getNodeUsingId(conImei);
+                  Edge ed1 = Edge(node, conn, paint: linePaint);
+                  Edge ed2 = Edge(conn, node, paint: linePaint);
+                  if (!newEds.contains(ed1)) newEds.add(ed1);
+                  if (!newEds.contains(ed2)) newEds.add(ed2);
                 }
               }
             }
           }
 
           for (Edge ed in _graph.edges) {
-            if (!new_eds.contains(ed)) _graph.edges.remove(ed);
+            if (!newEds.contains(ed)) _graph.edges.remove(ed);
           }
 
-          for (Edge ed in new_eds) {
+          for (Edge ed in newEds) {
             Edge edd = Edge(ed.destination, ed.source, paint: ed.paint);
 
             if (!_graph.edges.contains(ed) &&
                 !_graph.edges.contains(edd)) {
               _graph.edges.add(edd);
+              print("-- ${edd.source.key!.value} -> ${edd.destination.key!.value} --");
             }
           }
         });
       }
     });
+
+    //Оповестим, что мы подключились к серверу
+    setState(() {
+      _mqttIsConnected = true;
+    });
+
   }
 
   /// Pong callback
   void pong() {}
 
-  void onSubscribed(String topic) {
-    setState(() {
-      _is_subscribed = true;
-    });
-  }
+  void onSubscribed(String topic) {}
 
+  ///Запускает подключение к серверу
   Future<void> startMQTTConnect() async {
+    print("startMQTTConnect");
+    while(true) {
+      await Future.delayed(const Duration(seconds: 1));
+      if (kIsWeb) {
+        _mqttClient = MqttBrowserClient('wss://mqtt.hpn.kz', Guid.newGuid.toString());
+        _mqttClient.port = 8083;
+        //_mqttClient.autoReconnect = true;
+      } else {
+        _mqttClient = MqttServerClient('mqtt.hpn.kz', '');
+        _mqttClient.autoReconnect = true;
+      }
 
-    // if (kIsWeb) {
-    //   _client = MqttBrowserClient('wss://mqtt.hpn.kz', Guid.newGuid.toString());
-    //   _client.port = 8083;
-    // } else {
-      _client = MqttServerClient('mqtt.hpn.kz', '');
-    //}
 
+      _mqttClient.setProtocolV311();
+      _mqttClient.keepAlivePeriod = 5;
+      _mqttClient.onDisconnected = onDisconnected;
+      _mqttClient.onConnected = onConnected;
+      _mqttClient.onSubscribed = onSubscribed;
+      _mqttClient.pongCallback = pong;
+      final connMess = MqttConnectMessage()
+          .withClientIdentifier(Guid.newGuid.toString())
+          .startClean(); // Non persistent session for testing
 
-    _client.setProtocolV311();
-    _client.keepAlivePeriod = 20;
-    _client.onDisconnected = onDisconnected;
-    _client.onConnected = onConnected;
-    _client.onSubscribed = onSubscribed;
-    _client.pongCallback = pong;
-    final connMess = MqttConnectMessage()
-        .withClientIdentifier(Guid.newGuid.toString())
-        .startClean(); // Non persistent session for testing
+      _mqttClient.connectionMessage = connMess;
+      try {
+        await _mqttClient.connect("IoT", "wrtPhd82");
+      } on NoConnectionException catch (e) {
+        // Raised by the client when connection fails.
+        //_mqttClient.disconnect();
+        continue;
+      } on SocketException catch (e) {
+        // Raised by the socket layer
+        //_mqttClient.disconnect();
+        continue;
+      }
 
-    _client.connectionMessage = connMess;
-    try {
-      await _client.connect("IoT", "wrtPhd82");
-    } on NoConnectionException catch (e) {
-      // Raised by the client when connection fails.
-      _client.disconnect();
-    } on SocketException catch (e) {
-      // Raised by the socket layer
-      _client.disconnect();
+      /// Check we are connected
+      if (_mqttClient.connectionStatus!.state != MqttConnectionState.connected) {
+        //_mqttClient.disconnect();
+        continue;
+      }
+
+      break;
+
+      // setState(() {
+      //   _mqttIsConnected = true;
+      //   _is_subscribed = false;
+      //   _has_data = false;
+      // });
     }
-
-    /// Check we are connected
-    if (_client.connectionStatus!.state != MqttConnectionState.connected) {
-      _client.disconnect();
-    }
-
-    setState(() {
-      _mqtt_is_connected = true;
-      _is_subscribed = false;
-      _has_data = false;
-    });
+    print("startMQTTConnect end");
   }
 
+  ///Вызывается при отключении от сервера
   void onDisconnected() {
     print("onDisconnected");
     setState(() {
-      _is_subscribed = false;
-      _mqtt_is_connected = false;
-      _has_data = false;
-      // if (_barcode!="") {
-      //   Timer(const Duration(seconds: 5),() {startMQTTConnect();});
-      // }
+      _mqttIsConnected = false;
+      startMQTTConnect();
     });
   }
 
+
+  ///Запрашивает список связанных IMEI и подписывается на топики
   Future<void> getListIMEIs() async {
     var url =
-        Uri.parse('https://how.hpn.kz:8002/v1.0/device/imei/${get_imei()}');
+        Uri.parse('https://how.hpn.kz:8002/v1.0/device/imei/${getImei(_barcode)}');
     var response = await http.get(url);
     if (response.statusCode != 200) {
       return;
@@ -767,8 +806,22 @@ class _MyHomePageState extends State<MyHomePage> {
 
     for (var el in json.decode(response.body)) {
       _graph.addNode(Node.Id(el));
-      mqtt_subscribe('HOW/${el}/monitoring/mobile');
-      mqtt_subscribe('HOW/${el}/monitoring/wireless');
+      mqtt_subscribe('HOW/$el/monitoring/mobile');
+      mqtt_subscribe('HOW/$el/monitoring/wireless');
+    }
+
+    if (_graph.nodes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('IMEI не найден в базе!'),
+      ));
+      setState(() {
+        _barcode = "";
+        _selectedImei = "";
+        _data = <String, dynamic>{};
+        _graph.edges.clear();
+        _graph.nodes.clear();
+        _mqttClient.disconnect();
+      });
     }
   }
 
@@ -778,58 +831,43 @@ class _MyHomePageState extends State<MyHomePage> {
 
     startMQTTConnect();
 
-    // if (kIsWeb) {
-    //   _internet_is_connected = true;
-    //   startMQTTConnect();
-    // } else {
-      _subscription = Connectivity()
-          .onConnectivityChanged
-          .listen((ConnectivityResult result) {
-        if (result == ConnectivityResult.none) {
-          setState(() {
-            _internet_is_connected = false;
-          });
-        } else {
-          setState(() {
-            if (!_internet_is_connected) {
-              _internet_is_connected = true;
-              //startMQTTConnect();
-            }
-          });
-        }
-      });
-    //}
-
-    if (!_internet_is_connected) checkInternetState();
-
-    _t = Timer.periodic(Duration(seconds: 1), (Timer t) {
-      if (data.keys.length>0) {
-        for (var key in data.keys) {
+    //Раз в секунду проверяем что соединение не протухло
+    Timer.periodic(const Duration(seconds: 1), (Timer t) {
+      int min_dif = 1000000;
+      if (_data.keys.isNotEmpty) {
+        for (var key in _data.keys) {
           if (key.endsWith("_time")) {
-            DateTime d = data[key];
-            if (DateTime
+            DateTime d = _data[key];
+            int dif = DateTime
                 .now()
                 .difference(d)
-                .inSeconds > 120) {
+                .inSeconds;
+
+            min_dif = dif<min_dif?dif:min_dif;
+
+            if (dif > 120) {
               var imei = key.split("_")[0];
-              if (data.containsKey("${imei}_mobile"))
-                data.remove("${imei}_mobile");
-              if (data.containsKey("${imei}_wireless"))
-                data.remove("${imei}_wireless");
-              if (data.containsKey("${imei}_time"))
-                data.remove("${imei}_time");
+              if (_data.containsKey("${imei}_mobile")) {
+                _data.remove("${imei}_mobile");
+              }
+              if (_data.containsKey("${imei}_wireless")) {
+                _data.remove("${imei}_wireless");
+              }
+              if (_data.containsKey("${imei}_time")) {
+                _data.remove("${imei}_time");
+              }
               break;
             }
           }
         }
+        if (min_dif>61) {
+          setState(() {
+            _mqttIsConnected = false;
+          });
+        }
       }
-    });
-  }
 
-  @override
-  dispose() {
-    super.dispose();
-    _subscription.cancel();
+    });
   }
 
   @override
@@ -837,50 +875,44 @@ class _MyHomePageState extends State<MyHomePage> {
     return Scaffold(
         appBar: AppBar(
           leading: _barcode!="" ? IconButton(
-            icon: Icon(Icons.arrow_back, color: Colors.white),
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
             onPressed: () {
-              if (_selected!="") {
-                _selected = "";
+              if (_selectedImei!="") {
+                _selectedImei = "";
               } else {
-                // if (_graph.edges.length>0)
-                //   _graph.edges.removeAt(0);
-                //_graph.edges.clear();
                 setState(() {
                   _barcode = "";
-                  _selected = "";
-                  _is_subscribed = false;
-                  _has_data = false;
-                  data = <String, dynamic>{};
+                  _selectedImei = "";
+                  _data = <String, dynamic>{};
                   _graph.edges.clear();
                   _graph.nodes.clear();
-                  _client.disconnect();
+                  _mqttClient.disconnect();
                 });
               }
             },
-          ):SizedBox(),
+          ):const SizedBox(),
           title: Text(widget.title),
         ),
-        body: !_internet_is_connected
-            ? no_internet()
-            //: !_mqtt_is_connected           ? mqtt_connecting()
+        body: !_mqttIsConnected ? mqttConnecting()
             : !_barcode.startsWith("IMEI:") && !_barcode.startsWith("https://how.hpn.kz/info/?")
-                ? need_scan_qr()
-                : show_data());
+                ? needScanQR()
+                : showData());
   }
 
-  void checkInternetState() async {
-    var connectivityResult = await (Connectivity().checkConnectivity());
-    if (connectivityResult != ConnectivityResult.none) {
-      if (!_internet_is_connected) {
-        _internet_is_connected = true;
-        //startMQTTConnect();
-      }
-    }
-  }
+  // void checkInternetState() async {
+  //   var connectivityResult = await (Connectivity().checkConnectivity());
+  //   if (connectivityResult != ConnectivityResult.none) {
+  //     if (!_internetIsConnected) {
+  //       _internetIsConnected = true;
+  //       //startMQTTConnect();
+  //     }
+  //   }
+  // }
 
 
 }
 
+///Это нужно для того чтобы https сертификаты нормально работали
 class MyHttpOverrides extends HttpOverrides{
   @override
   HttpClient createHttpClient(SecurityContext? context){

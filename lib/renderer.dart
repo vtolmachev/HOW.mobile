@@ -19,7 +19,11 @@ class MyEdgeRenderer extends EdgeRenderer {
       ..color = paint.color
       ..style = PaintingStyle.fill;
 
+    print("start paint len = ${graph.edges.length}");
+
+    //Перебираем все связи
     graph.edges.forEach((edge) {
+
       var source = edge.source;
       var destination = edge.destination;
 
@@ -65,12 +69,30 @@ class MyEdgeRenderer extends EdgeRenderer {
             .toList()
             .first]['results'].toList();
         for (var w_el in w_data) {
+          if (!w_el.containsKey("mac")) {
+            continue;
+          }
+
+          String mac_dst = w_el["mac"].toLowerCase();
+
+          if (!data.containsKey("mac_${mac_dst}")) {
+            continue;
+          }
+
+          String imei_dst = data["mac_${mac_dst}"];
+          if (imei_dst!=edge.destination.key!.value) {
+            continue;
+          }
+
           String signal = w_el['signal'].toString();
           String noise = w_el['noise'].toString();
           double tx = double.parse(w_el['tx_rate'].toString())/1000.0;
           double rx = double.parse(w_el['rx_rate'].toString())/1000.0;
           double rtx = tx>rx?tx:rx;
           String rtx_rate = rtx.toStringAsFixed(0);
+
+          print("paint: ${edge.source.key!.value} -> ${edge.destination.key!.value} rtx = ${rtx_rate}");
+
 
           //String tx_rate = (tx).toStringAsFixed(0);
           //String rx_rate = (double.parse(w_el['rx_rate'].toString())/1000.0).toStringAsFixed(0);
@@ -154,10 +176,12 @@ class MyEdgeRenderer extends EdgeRenderer {
       }
 
 
+
       // canvas.drawLine(Offset(clippedLine[0], clippedLine[1]), Offset(triangleCentroid[0], triangleCentroid[1]),
       //     p);
 
     });
+    print("end paint");
   }
 
   List<double> drawTriangle(Canvas canvas, Paint paint, double x1, double y1, double x2, double y2) {
